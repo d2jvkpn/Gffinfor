@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	gzip "github.com/klauspost/pgzip" //"compress/gzip"
 	"log"
@@ -16,7 +15,7 @@ import (
 )
 
 const HELP = `
-Summary gff/gtf (.gz) and extract attributions, usage:
+GFF/GTF (.gz) summary and attributions extraction, usage:
     summary sequences, sources, types
     $ Gffinfor  <gff>
     note: stdin ("-") will be treated as gff format
@@ -31,13 +30,13 @@ Summary gff/gtf (.gz) and extract attributions, usage:
 
 
 author: d2jvkpn
-version: 1.0
-release: 2019-04-02
+version: 1.2
+release: 2019-06-03
 project: https://github.com/d2jvkpn/Gffinfor
 lisense: GPLv3 (https://www.gnu.org/licenses/gpl-3.0.en.html)
 `
 
-var parseAttr func(string, map[string]string) error
+var parseAttr func(string, map[string]string, int) bool
 
 func main() {
 	if len(os.Args) == 1 || os.Args[1] == "-h" || os.Args[1] == "--help" {
@@ -47,8 +46,10 @@ func main() {
 
 	if strings.HasSuffix(os.Args[1], ".gtf") ||
 		strings.HasSuffix(os.Args[1], ".gtf.gz") {
+		log.Printf("parsing GTF file: %s\n", os.Args[1])
 		parseAttr = gtfattr
 	} else {
+		log.Println("parsing GFF file: %s\n", os.Args[1])
 		parseAttr = gffattr
 	}
 
@@ -72,22 +73,25 @@ func main() {
 }
 
 //
-func gtfattr(s string, kv map[string]string) (err error) {
+func gtfattr(s string, kv map[string]string, line int) bool {
 	tmp := make(map[string]string)
+	var msg string
 
 	s = strings.TrimRight(strings.Trim(s, " "), ";")
+	msg = "failed to parse attribution of gtf at line %d\n"
 
 	for _, i := range strings.Split(s, "\"; ") {
 		if i == "" {
 			continue
 		}
 		ii := strings.SplitN(i, " ", 2)
-		ii[1], _ = url.QueryUnescape(ii[1])
+
 		if len(ii) != 2 {
-			err = errors.New(fmt.Sprintf("failed to split %s", i))
-			return
+			fmt.Fprintf(os.Stderr, msg, line)
+			return false
 		}
 
+		ii[1], _ = url.QueryUnescape(ii[1])
 		tmp[ii[0]] = strings.Trim(ii[1], "\"")
 	}
 
@@ -95,22 +99,26 @@ func gtfattr(s string, kv map[string]string) (err error) {
 		kv[k] = v
 	}
 
-	return
+	return true
 }
 
-func gffattr(s string, kv map[string]string) (err error) {
+func gffattr(s string, kv map[string]string, line int) bool {
 	tmp := make(map[string]string)
+	var msg string
+	msg = "failed to parse attribution of gff at line %d\n"
 
 	for _, i := range strings.Split(s, ";") {
 		if i == "" {
 			continue
 		}
 		ii := strings.SplitN(i, "=", 2)
-		ii[1], _ = url.QueryUnescape(ii[1])
+
 		if len(ii) != 2 {
-			err = errors.New(fmt.Sprintf("failed to split %s", i))
-			return
+			fmt.Fprintf(os.Stderr, msg, line)
+			return false
 		}
+
+		ii[1], _ = url.QueryUnescape(ii[1])
 
 		tmp[ii[0]] = ii[1]
 	}
@@ -119,7 +127,7 @@ func gffattr(s string, kv map[string]string) (err error) {
 		kv[k] = v
 	}
 
-	return
+	return true
 }
 
 //
@@ -128,16 +136,26 @@ func P1(scanner *bufio.Scanner) {
 	Sources := make(map[string]int)
 	Types := make(map[string]int)
 	var fds []string
+	var i int
 
 	for scanner.Scan() {
+		i++
 		line := scanner.Text()
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
+
 		fds = strings.SplitN(line, "\t", 9)
+
 		if fds[0] == "" {
 			continue
 		}
+
+		if len(fds) != 9 {
+			fmt.Fprintf(os.Stderr, "invalid record at line %d\n", i)
+			continue
+		}
+
 		Sequences[fds[0]]++
 		Sources[fds[1]]++
 		Types[fds[2]]++
@@ -179,7 +197,6 @@ func P1(scanner *bufio.Scanner) {
 func P2(scanner *bufio.Scanner, types []string) {
 	TypeAttrs := make(map[string]map[string]int)
 	var fds []string
-	var err error
 	var i int
 
 	for scanner.Scan() {
@@ -192,17 +209,18 @@ func P2(scanner *bufio.Scanner, types []string) {
 		if fds[0] == "" {
 			continue
 		}
+
+		if len(fds) != 9 {
+			fmt.Fprintf(os.Stderr, "invalid record at line %d\n", i)
+			continue
+		}
+
 		if types[0] != "" && !HasElem(types, fds[2]) {
 			continue
 		}
 
 		kv := make(map[string]string)
-		err = parseAttr(fds[8], kv)
-
-		if err != nil {
-			log.Printf("failed to parse attributions at line %d:"+
-				"\n    %s\n    %s\n\n", i, err, fds[8])
-
+		if !parseAttr(fds[8], kv, i) {
 			continue
 		}
 
@@ -243,7 +261,6 @@ func P2(scanner *bufio.Scanner, types []string) {
 func P3(scanner *bufio.Scanner, types, attrs []string) {
 	var fds []string
 	fmt.Println(strings.Join(attrs, "\t"))
-	var err error
 	var i int
 
 	for scanner.Scan() {
@@ -256,17 +273,18 @@ func P3(scanner *bufio.Scanner, types, attrs []string) {
 		if fds[0] == "" {
 			continue
 		}
+
+		if len(fds) != 9 {
+			fmt.Fprintf(os.Stderr, "invalid record at line %d\n", i)
+			continue
+		}
+
 		if types[0] != "" && !HasElem(types, fds[2]) {
 			continue
 		}
 
 		kv := make(map[string]string)
-		err = parseAttr(fds[8], kv)
-
-		if err != nil {
-			log.Printf("failed to parse attributions at line %d:"+
-				"\n    %s\n    %s\n\n", i, err, fds[8])
-
+		if !parseAttr(fds[8], kv, i) {
 			continue
 		}
 
@@ -320,7 +338,6 @@ func PrintStrSlice(array [][]string) {
 		fmt.Fprintln(w, "    "+strings.Join(r, "\t"))
 	}
 	w.Flush()
-
 }
 
 type CmdInput struct {
