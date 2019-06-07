@@ -30,8 +30,8 @@ GFF/GTF (.gz) summary and attributions extraction, usage:
 
 
 author: d2jvkpn
-version: 1.2
-release: 2019-06-03
+version: 1.3
+release: 2019-06-06
 project: https://github.com/d2jvkpn/Gffinfor
 lisense: GPLv3 (https://www.gnu.org/licenses/gpl-3.0.en.html)
 `
@@ -49,7 +49,7 @@ func main() {
 		log.Printf("parsing GTF file: %s\n", os.Args[1])
 		parseAttr = gtfattr
 	} else {
-		log.Println("parsing GFF file: %s\n", os.Args[1])
+		log.Printf("parsing GFF file: %s\n", os.Args[1])
 		parseAttr = gffattr
 	}
 
@@ -76,6 +76,7 @@ func main() {
 func gtfattr(s string, kv map[string]string, line int) bool {
 	tmp := make(map[string]string)
 	var msg string
+	var ok bool
 
 	s = strings.TrimRight(strings.Trim(s, " "), ";")
 	msg = "failed to parse attribution of gtf at line %d\n"
@@ -92,7 +93,11 @@ func gtfattr(s string, kv map[string]string, line int) bool {
 		}
 
 		ii[1], _ = url.QueryUnescape(ii[1])
-		tmp[ii[0]] = strings.Trim(ii[1], "\"")
+		ii[1] = strings.Trim(ii[1], "\"")
+
+		if _, ok = tmp[ii[0]]; !ok {
+			tmp[ii[0]] = ii[1] // make sure using the first k-v paire
+		}
 	}
 
 	for k, v := range tmp {
@@ -105,6 +110,7 @@ func gtfattr(s string, kv map[string]string, line int) bool {
 func gffattr(s string, kv map[string]string, line int) bool {
 	tmp := make(map[string]string)
 	var msg string
+	var ok bool
 	msg = "failed to parse attribution of gff at line %d\n"
 
 	for _, i := range strings.Split(s, ";") {
@@ -120,7 +126,9 @@ func gffattr(s string, kv map[string]string, line int) bool {
 
 		ii[1], _ = url.QueryUnescape(ii[1])
 
-		tmp[ii[0]] = ii[1]
+		if _, ok = tmp[ii[0]]; !ok {
+			tmp[ii[0]] = ii[1] // make sure using the first k-v paire
+		}
 	}
 
 	for k, v := range tmp {
