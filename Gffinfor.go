@@ -7,31 +7,33 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 )
 
-const HELP = `
-GFF/GTF (.gz) summary and attributions extraction, usage:
-    summary sequences, sources, types
-    $ Gffinfor  <gff>
-    note: stdin ("-") will be treated as gff format
+const HELP = `GFF/GTF(.gz) summary and attributions extraction, usage:
+  sequences, sources, types summary
+    $ Gffinfor  <gff|gtf>
+    # stdin ("-") will be treated as gff format
 
-    summary types' attributions
-    $ Gffinfor  <gff>  <type1,type2...>
-    note: "" for any type
+  selected types' attributions statistics
+    $ Gffinfor  <gff|gtf>  <type1,type2...>
+    # "" for any type
 
-    extract attributions and Dbxref (tsv format)
-    $ Gffinfor  <gff>  <type1,type2...>  <attr1,attr2,dbxref1,dbxref2...>
-	note: "position" for "chrom:start:end:strand", "type" for the third column
-
+  extract attributions and Dbxref (tsv format)
+    $ Gffinfor  <gff|gtf>  <type1,type2...>  <attr1,attr2,dbxref1...> \
+        [h1:H1,h2:H2]
+    # attr "4" for position in "sequence_id:start:end:strand" format, 
+    #   colname: position
+    # attr "3" for the type(3rd column), colname: type
+    # attr "0" for all columns(whole line), colnames: 1 2 3 4 5 6 7 8 9
+    # [h1:H1,h2:H2] for rename tsv header
 
 author: d2jvkpn
-version: 1.3
-release: 2019-06-06
+version: 1.4
+release: 2019-06-10
 project: https://github.com/d2jvkpn/Gffinfor
 lisense: GPLv3 (https://www.gnu.org/licenses/gpl-3.0.en.html)
 `
@@ -63,10 +65,14 @@ func main() {
 	case 2:
 		P1(ci.Scanner)
 	case 3:
-		P2(ci.Scanner, strings.SplitN(os.Args[2], ",", -1))
-	case 4:
-		P3(ci.Scanner, strings.SplitN(os.Args[2], ",", -1),
-			strings.SplitN(os.Args[3], ",", -1))
+		P2(ci.Scanner, strings.Split(os.Args[2], ","))
+	case 4, 5:
+		var renames []string
+		if len(os.Args) == 5 {
+			renames = strings.Split(os.Args[4], ",")
+		}
+		P3(ci.Scanner, strings.Split(os.Args[2], ","),
+			strings.SplitN(os.Args[3], ",", -1), renames)
 	default:
 		fmt.Println(HELP)
 	}
@@ -172,8 +178,7 @@ func P1(scanner *bufio.Scanner) {
 	var array [][]string
 	array = append(array, []string{"NAME", "COUNT"})
 
-	array = append(array,
-		[]string{"Sequences", strconv.Itoa(len(Sequences))})
+	array = append(array, []string{"sequences", strconv.Itoa(len(Sequences))})
 
 	var sKeys []string
 	for k, _ := range Sources {
@@ -223,7 +228,7 @@ func P2(scanner *bufio.Scanner, types []string) {
 			continue
 		}
 
-		if types[0] != "" && !HasElem(types, fds[2]) {
+		if types[0] != "" && StrSliceIndex(types, fds[2]) == -1 {
 			continue
 		}
 
@@ -266,10 +271,51 @@ func P2(scanner *bufio.Scanner, types []string) {
 }
 
 //
-func P3(scanner *bufio.Scanner, types, attrs []string) {
-	var fds []string
-	fmt.Println(strings.Join(attrs, "\t"))
-	var i int
+func P3(scanner *bufio.Scanner, types, attrs, renames []string) {
+	var fds, x, rn []string
+	var i, j int
+
+	for i = 0; i < len(attrs)-1; i++ {
+		if j = StrSliceIndex(attrs[i+1:], attrs[i]); j != -1 {
+			log.Printf("duplicated attr field: %s\n", attrs[j])
+			attrs = append(attrs[:j], attrs[j+1:]...)
+		}
+	}
+
+	x = make([]string, len(attrs), len(attrs))
+	copy(x, attrs)
+
+	if j = StrSliceIndex(x, "0"); j > -1 {
+		x[j] = "1\t2\t3\t4\t5\t6\t7\t8\t9"
+	}
+
+	if j = StrSliceIndex(x, "3"); j > -1 {
+		x[j] = "type"
+	}
+
+	if j = StrSliceIndex(x, "4"); j > -1 {
+		x[j] = "position"
+	}
+
+	if len(renames) > 0 {
+		for j = range renames {
+			rn = strings.SplitN(renames[j], ":", 2)
+
+			if len(rn) != 2 {
+				log.Fatalf("invalid rename field: %s\n", renames[j])
+			}
+
+			if StrSliceIndex(x, rn[0]) == -1 {
+				log.Fatalf("head \"%s\" isn't in selected attrs: %s\n", rn[0])
+			}
+
+			x[StrSliceIndex(x, rn[0])] = rn[1]
+		}
+	}
+
+	fmt.Println(strings.Join(x, "\t"))
+
+	i = 0
 
 	for scanner.Scan() {
 		i++
@@ -287,7 +333,7 @@ func P3(scanner *bufio.Scanner, types, attrs []string) {
 			continue
 		}
 
-		if types[0] != "" && !HasElem(types, fds[2]) {
+		if types[0] != "" && StrSliceIndex(types, fds[2]) == -1 {
 			continue
 		}
 
@@ -304,10 +350,8 @@ func P3(scanner *bufio.Scanner, types, attrs []string) {
 			kv[x[0]] = x[1]
 		}
 
-		kv["position"] = strings.Join(
-			[]string{fds[0], fds[3], fds[4], fds[6]}, ":")
-
-		kv["type"] = fds[2]
+		kv["0"], kv["3"] = line, fds[2]
+		kv["4"] = strings.Join([]string{fds[0], fds[3], fds[4], fds[6]}, ":")
 
 		values := []string{}
 		for _, k := range attrs {
@@ -318,26 +362,21 @@ func P3(scanner *bufio.Scanner, types, attrs []string) {
 	}
 }
 
-func HasElem(s interface{}, elem interface{}) bool {
-	arrV := reflect.ValueOf(s)
-
-	if arrV.Kind() == reflect.Slice {
-		for i := 0; i < arrV.Len(); i++ {
-			// XXX - panics if slice element points to an unexported struct field
-			// see https://golang.org/pkg/reflect/#Value.Interface
-			if arrV.Index(i).Interface() == elem {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 func SortStrSlice(s []string) {
 	sort.Slice(s, func(i, j int) bool {
 		return strings.ToLower(s[i]) < strings.ToLower(s[j])
 	})
+}
+
+func StrSliceIndex(slice []string, value string) (p int) {
+	for p = range slice {
+		if slice[p] == value {
+			return
+		}
+	}
+
+	p = -1
+	return
 }
 
 func PrintStrSlice(array [][]string) {
