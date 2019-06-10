@@ -1,4 +1,4 @@
-<prev>
+<pre>
 GFF/GTF(.gz) summary and attributions extraction, usage:
   sequences, sources, types summary
     $ Gffinfor  <gff|gtf>
@@ -22,4 +22,4 @@ version: 1.4
 release: 2019-06-10
 project: https://github.com/d2jvkpn/Gffinfor
 lisense: GPLv3 (https://www.gnu.org/licenses/gpl-3.0.en.html
-</prev>
+</pre>
